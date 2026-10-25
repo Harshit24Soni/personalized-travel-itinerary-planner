@@ -217,7 +217,15 @@ def _cluster_day(stops: list[dict[str, Any]], used_names: set[str]) -> list[dict
     )
 
 
-def generate_demo_itinerary(destination: str, days: int, interests: list[str], budget: str, party: str) -> list[dict[str, Any]]:
+def generate_demo_itinerary(
+    destination: str,
+    days: int,
+    interests: list[str],
+    budget: str,
+    party: str,
+    party_size: int | None = None,
+    dietary_needs: list[str] | None = None,
+) -> list[dict[str, Any]]:
     info = CITIES[destination]
     all_stops = info["stops"]
     preferred = [stop for stop in all_stops if not interests or stop["kind"].lower() in {item.lower() for item in interests}]
@@ -225,15 +233,21 @@ def generate_demo_itinerary(destination: str, days: int, interests: list[str], b
     itinerary: list[dict[str, Any]] = []
     used_names: set[str] = set()
     budget_factor = {"Budget": 0.8, "Moderate": 1.0, "Luxury": 1.45}.get(budget, 1.0)
-    party_factor = 1.0 if party == "Solo" else 1.7 if party == "Couple" else 2.5 if party == "Family" else 2.0
+    default_party_sizes = {"Solo": 1, "Couple": 2, "Family": 4, "Friends": 4}
+    party_factor = party_size or default_party_sizes.get(party, 1)
+    dietary_needs = dietary_needs or []
     for day_number in range(1, days + 1):
         selected = _cluster_day(pool, used_names)
         used_names.update(stop["name"] for stop in selected)
         activities = []
         for slot, stop in zip(SLOT_ORDER, selected):
             cost = round(stop["cost"] * budget_factor * party_factor)
+            activity_name = stop["name"]
+            if slot == "Lunch Recommendation" and dietary_needs:
+                needs_label = " / ".join(dietary_needs)
+                activity_name = f"{needs_label}-friendly meal near {stop['area']}"
             activities.append({
-                "slot": slot, "name": stop["name"], "area": stop["area"], "kind": stop["kind"],
+                "slot": slot, "name": activity_name, "area": stop["area"], "kind": stop["kind"],
                 "description": f"Explore {stop['area']} with an easy connection to the next stop.",
                 "cost_local": cost, "currency": info["currency"],
                 "cost_usd": round(estimate_usd(cost, info["currency"]), 2),
@@ -275,10 +289,12 @@ def generate_ai_itinerary(
     party: str,
     pace: str,
     dates: str,
+    party_size: int | None = None,
+    dietary_needs: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     info = CITIES[destination]
     prompt = f"""Create a realistic {days}-day itinerary for {destination}, {info['country']} ({dates}).
-Travel party: {party}. Budget: {budget}. Pace: {pace}. Interests: {', '.join(interests) or 'general discovery'}.
+Travel party: {party} ({party_size or 'party size not specified'} people). Dietary needs: {', '.join(dietary_needs or []) or 'none specified'}. Budget: {budget}. Pace: {pace}. Interests: {', '.join(interests) or 'general discovery'}.
 Use these local places as grounding and keep each day geographically clustered, minimizing backtracking: {json.dumps(info['stops'], ensure_ascii=False)}.
 Return ONLY a JSON array with exactly {days} objects. Each object must have integer day, string title, and activities array with exactly these sequential slots: {json.dumps(SLOT_ORDER)}.
 Each activity object must include slot, name, area, kind, description, cost_local (number, per trip party), currency ("{info['currency']}"), and cost_usd (number). No markdown or extra keys are needed."""

@@ -141,19 +141,27 @@ def _render_activity(activity: dict[str, Any]) -> None:
 
 
 def _make_trip(destination: str, days: int, start_date: date, budget: str, party: str, pace: str,
-               interests: list[str], provider_mode: str, api_key: str) -> dict[str, Any]:
+               interests: list[str], party_size: int, dietary_needs: list[str],
+               provider_mode: str, api_key: str) -> dict[str, Any]:
     end_date = start_date + timedelta(days=days - 1)
     date_label = f"{as_trip_date(start_date)} to {as_trip_date(end_date)}"
     used_ai = False
     if provider_mode in ("Gemini", "Groq") and api_key:
         try:
-            itinerary = generate_ai_itinerary(provider_mode, api_key, destination, days, interests, budget, party, pace, date_label)
+            itinerary = generate_ai_itinerary(
+                provider_mode, api_key, destination, days, interests, budget, party, pace,
+                date_label, party_size, dietary_needs,
+            )
             used_ai = True
         except Exception:
             st.warning("The AI service could not return a usable itinerary. A curated demo itinerary is shown instead; your API key was not saved.")
-            itinerary = generate_demo_itinerary(destination, days, interests, budget, party)
+            itinerary = generate_demo_itinerary(
+                destination, days, interests, budget, party, party_size, dietary_needs,
+            )
     else:
-        itinerary = generate_demo_itinerary(destination, days, interests, budget, party)
+        itinerary = generate_demo_itinerary(
+            destination, days, interests, budget, party, party_size, dietary_needs,
+        )
     return {
         "id": f"{destination}-{date.today().isoformat()}-{len(st.session_state.saved_trips) + 1}",
         "destination": destination,
@@ -163,8 +171,10 @@ def _make_trip(destination: str, days: int, start_date: date, budget: str, party
         "end_date": as_trip_date(end_date),
         "budget": budget,
         "party": party,
+        "party_size": party_size,
         "pace": pace,
         "interests": interests,
+        "dietary_needs": dietary_needs,
         "itinerary": itinerary,
         "created_at": date.today().isoformat(),
         "source": provider_mode if used_ai else "Demo mode",
@@ -194,8 +204,11 @@ with st.sidebar:
     start_date = st.date_input("Travel start date", value=date.today() + timedelta(days=21), min_value=date.today())
     budget = st.selectbox("Budget level", ["Budget", "Moderate", "Luxury"], index=1)
     party = st.selectbox("Travel party", ["Solo", "Couple", "Family", "Friends"])
+    party_defaults = {"Solo": 1, "Couple": 2, "Family": 4, "Friends": 4}
+    party_size = st.number_input("Number of travelers", min_value=1, max_value=20, value=party_defaults[party], step=1)
     pace = st.selectbox("Pace", ["Relaxed", "Moderate", "Fast-Paced"], index=1)
     interests = st.multiselect("Interests", ["Food", "Adventure", "History", "Nightlife"], default=["Food", "History"])
+    dietary_needs = st.multiselect("Dietary needs", ["Vegetarian", "Vegan", "Gluten-free", "Halal", "Dairy-free"])
     if destination == "No fixed destination":
         st.caption("Pick a destination from the recommender before generating an itinerary.")
 
@@ -245,7 +258,10 @@ with tab_itinerary:
         end_date = start_date + timedelta(days=int(trip_days) - 1)
         st.write(f"**{destination}, {CITIES[destination]['country']}** · {start_date:%b %d} – {end_date:%b %d, %Y} · {trip_days} days")
         if st.button("Generate optimized trip", type="primary", icon="🧭", use_container_width=False):
-            trip = _make_trip(destination, int(trip_days), start_date, budget, party, pace, interests, provider_mode, api_key)
+            trip = _make_trip(
+                destination, int(trip_days), start_date, budget, party, pace, interests,
+                int(party_size), dietary_needs, provider_mode, api_key,
+            )
             st.session_state.current_trip = trip
             st.session_state.saved_trips.insert(0, trip)
             st.success(f"Your {trip['days']}-day plan for {destination} is ready.")
@@ -303,13 +319,15 @@ with tab_custom:
                     replacement = generate_ai_itinerary(
                         provider_mode, api_key, active_trip["destination"], 1, active_trip["interests"],
                         active_trip["budget"], active_trip["party"], active_trip["pace"], as_trip_date(day_date),
+                        active_trip.get("party_size"), active_trip.get("dietary_needs", []),
                     )[0]
                 except Exception:
                     st.warning("The AI service could not regenerate this day. A different curated day is shown instead.")
             if replacement is None:
                 replacement = generate_demo_itinerary(
                     active_trip["destination"], chosen_day_number + 1, active_trip["interests"],
-                    active_trip["budget"], active_trip["party"],
+                    active_trip["budget"], active_trip["party"], active_trip.get("party_size"),
+                    active_trip.get("dietary_needs", []),
                 )[-1]
             replacement["day"] = chosen_day_number
             replacement["title"] = f"Day {chosen_day_number} · refreshed neighborhood plan"
